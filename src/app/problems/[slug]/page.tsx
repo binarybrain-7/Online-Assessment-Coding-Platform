@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { Badge } from "@/components/ui/Badge";
 import { MonacoEditor } from "@/components/editor/MonacoEditor";
 import { Problem, Submission } from "@/types";
 
@@ -87,83 +86,19 @@ export default async function ProblemDetailPage({ params }: PageProps) {
     .order("accuracy_score", { ascending: false })
     .limit(10);
 
-  const difficultyVariant =
-    problem.difficulty === "Easy"
-      ? "easy"
-      : problem.difficulty === "Medium"
-      ? "medium"
-      : "hard";
-
   const problemTypeName = problem.problem_type?.name ?? "dsa";
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 py-2">
-      <div className="lg:col-span-5 glass-panel p-6 rounded-xl space-y-6 overflow-y-auto max-h-[750px]">
-        <div className="space-y-3 pb-4 border-b border-slate-800">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant={difficultyVariant}>{problem.difficulty}</Badge>
-            <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono uppercase">
-              {problemTypeName}
-            </span>
-          </div>
-
-          <h1 className="text-2xl font-extrabold text-slate-100">
-            {problem.title}
-          </h1>
-
-          {problem.categories && problem.categories.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {problem.categories.map((cat) => (
-                <span
-                  key={cat.id}
-                  className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                >
-                  {cat.name}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="prose prose-invert max-w-none text-xs sm:text-sm text-slate-300 space-y-3 leading-relaxed">
-          <div dangerouslySetInnerHTML={{ __html: problem.description.replace(/\n/g, '<br/>') }} />
-        </div>
-
-        {problem.constraints && (
-          <div className="p-4 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1">
-            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              Constraints
-            </h4>
-            <pre className="text-xs font-mono text-slate-300 whitespace-pre-wrap">
-              {problem.constraints}
-            </pre>
-          </div>
-        )}
-
-        {problem.hints && problem.hints.length > 0 && (
-          <div className="p-4 rounded-lg bg-amber-500/5 border border-amber-500/20 space-y-1">
-            <h4 className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
-              Hints
-            </h4>
-            <ul className="list-disc list-inside text-xs text-amber-200 space-y-1">
-              {problem.hints.map((hint, idx) => (
-                <li key={idx}>{hint}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-
-      <div className="lg:col-span-7">
-        <MonacoEditor
-          problemId={problem.id}
-          problemType={problemTypeName}
-          initialFiles={problemFiles ?? []}
-          testCases={testCases ?? []}
-          previousSubmission={userSubmission}
-          publicSubmissions={publicSubmissions ?? []}
-        />
-      </div>
+    <div className="py-2">
+      <MonacoEditor
+        problem={problem}
+        problemId={problem.id}
+        problemType={problemTypeName}
+        initialFiles={problemFiles ?? []}
+        testCases={testCases ?? []}
+        previousSubmission={userSubmission}
+        publicSubmissions={publicSubmissions ?? []}
+      />
     </div>
   );
 }
