@@ -166,6 +166,20 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ### 4. Database Setup
 Navigate to the Supabase SQL editor in your project dashboard and execute the contents of `supabase/schema.sql` to generate the required tables and policies.
 
+Existing databases should apply
+[`supabase/migrations/20261019_problem_templates_access.sql`](./supabase/migrations/20261019_problem_templates_access.sql)
+to backfill and sequence `problem_number`, ensure the starter-template table
+exists, and configure Row Level Security. Published problems and their starter
+templates are readable publicly; template management remains restricted to
+admins. Browser reads of test cases are limited to rows with `is_hidden = false`.
+Hidden cases should be evaluated only by the trusted execution backend.
+
+Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` for the
+frontend. These values use the existing public Supabase client and must not be
+replaced with the service-role key. Set `NEXT_PUBLIC_API_BASE_URL` to the
+Spring Boot execution API URL. Run and Submit continue to POST to
+`/submissions/run` through that API.
+
 ### 5. Start Development Server
 ```bash
 npm run dev

@@ -55,6 +55,7 @@ export interface Tag {
 
 export interface Problem {
   id: number;
+  problem_number?: number;
   title: string;
   slug: string;
   description: string;
@@ -68,6 +69,18 @@ export interface Problem {
   problem_type?: ProblemType;
   categories?: Category[];
   tags?: Tag[];
+}
+
+export interface ProblemCodeTemplate {
+  id: number;
+  problem_id: number;
+  language: string;
+  starter_code: string;
+  entry_class: string | null;
+  entry_method: string | null;
+  execution_mode: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface TestCase {

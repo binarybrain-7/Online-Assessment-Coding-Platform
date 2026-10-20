@@ -29,6 +29,11 @@ export function ProblemCard({ problem, isSolved }: ProblemCardProps) {
               href={`/problems/${problem.slug}`}
               className="text-base font-semibold text-slate-100 hover:text-blue-400 transition-colors truncate block"
             >
+              {problem.problem_number != null && (
+                <span className="mr-2 text-slate-400 font-mono">
+                  #{problem.problem_number}
+                </span>
+              )}
               {problem.title}
             </Link>
 
@@ -48,6 +53,16 @@ export function ProblemCard({ problem, isSolved }: ProblemCardProps) {
                     className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
                   >
                     #{cat.name}
+                  </span>
+                ))}
+
+              {problem.tags &&
+                problem.tags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="text-xs px-2 py-0.5 rounded bg-slate-800/70 text-slate-400"
+                  >
+                    #{tag.name}
                   </span>
                 ))}
             </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import {
   Play,
@@ -30,128 +30,48 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { submitProblemSolution } from "@/lib/api/submissions";
+import { fetchProblemCodeTemplate } from "@/lib/supabase/problems";
 
 export interface MonacoEditorProps {
   problem?: Problem;
   problemId: number;
   problemType: "dsa" | "development" | "sql" | "bash" | string;
+  allowedLanguages: string[];
+  executionConfigError?: string;
   initialFiles?: ProblemFile[];
   testCases?: TestCase[];
+  testCasesError?: string;
   previousSubmission?: Submission | null;
   publicSubmissions?: Submission[];
   onSubmissionSuccess?: (result: ExecutionResult) => void;
 }
 
-// Starter boilerplate templates for each supported language
-const STARTER_TEMPLATES: Record<
-  string,
-  {
-    twoSum: string;
-    generic: (title?: string) => string;
+function normalizeLanguage(language: string): string {
+  const normalized = language.toLowerCase();
+  if (normalized === "c++") return "cpp";
+  if (normalized === "shell") return "bash";
+  return normalized;
+}
+
+function getLanguageLabel(language: string): string {
+  switch (normalizeLanguage(language)) {
+    case "java":
+      return "Java";
+    case "cpp":
+      return "C++";
+    case "python":
+      return "Python";
+    case "javascript":
+      return "JavaScript";
+    case "typescript":
+      return "TypeScript";
+    case "sql":
+      return "PostgreSQL / SQL";
+    case "bash":
+      return "Bash Script";
+    default:
+      return language;
   }
-> = {
-  java: {
-    twoSum: `class Solution {
-    public int[] twoSum(int[] nums, int target) {
-        // Write your solution here
-        
-        return new int[]{};
-    }
-}`,
-    generic: (title?: string) => `class Solution {
-    public void solve() {
-        // Write your solution for ${title || "this problem"} here
-        
-    }
-}`,
-  },
-  cpp: {
-    twoSum: `#include <vector>
-
-class Solution {
-public:
-    std::vector<int> twoSum(std::vector<int>& nums, int target) {
-        // Write your solution here
-        
-        return {};
-    }
-};`,
-    generic: (title?: string) => `#include <iostream>
-#include <vector>
-#include <string>
-
-using namespace std;
-
-class Solution {
-public:
-    void solve() {
-        // Write your solution for ${title || "this problem"} here
-        
-    }
-};`,
-  },
-  python: {
-    twoSum: `class Solution:
-    def twoSum(self, nums: list[int], target: int) -> list[int]:
-        # Write your solution here
-        pass`,
-    generic: (title?: string) => `class Solution:
-    def solve(self):
-        # Write your solution for ${title || "this problem"} here
-        pass`,
-  },
-  javascript: {
-    twoSum: `/**
- * @param {number[]} nums
- * @param {number} target
- * @return {number[]}
- */
-function twoSum(nums, target) {
-    // Write your solution here
-    return [];
-}`,
-    generic: () => `// Write your solution here
-function solve(input) {
-    return input;
-}`,
-  },
-  typescript: {
-    twoSum: `function twoSum(nums: number[], target: number): number[] {
-    // Write your solution here
-    return [];
-}`,
-    generic: () => `// Write your solution here
-function solve(input: any): any {
-    return input;
-}`,
-  },
-};
-
-function getStarterCode(
-  problemSlug: string,
-  problemTitle: string,
-  language: string
-): string {
-  const isTwoSum =
-    problemSlug === "two-sum" ||
-    problemTitle.toLowerCase().includes("two sum");
-
-  const langKey = language.toLowerCase();
-  const template = STARTER_TEMPLATES[langKey];
-  if (template) {
-    return isTwoSum ? template.twoSum : template.generic(problemTitle);
-  }
-
-  if (langKey === "sql") {
-    return `-- Write your SQL query here\nSELECT * FROM table_name;`;
-  }
-  if (langKey === "bash" || langKey === "shell") {
-    return `#!/bin/bash\n# Write your bash script here\n`;
-  }
-
-  return isTwoSum
-    ? `class Solution {\n    // Solution implementation\n}`
-    : `// Write your solution here\nfunction solve(input) {\n    return input;\n}`;
 }
 
 function getFileExtension(language: string): string {
@@ -198,57 +118,74 @@ export function MonacoEditor({
   problem,
   problemId,
   problemType,
+  allowedLanguages,
+  executionConfigError,
   initialFiles = [],
   testCases = [],
+  testCasesError,
   previousSubmission = null,
   publicSubmissions = [],
   onSubmissionSuccess,
 }: MonacoEditorProps) {
-  const problemSlug = problem?.slug ?? "two-sum";
-  const problemTitle = problem?.title ?? "Two Sum";
-
-  // Default language logic: prefer Java for DSA problems unless previous submission exists
-  const defaultLanguage =
-    problemType === "sql"
+  const problemTitle = problem?.title ?? "";
+  const languageOptionsByType: Record<string, string[]> = {
+    dsa: ["java", "cpp", "python"],
+    development: ["javascript", "typescript"],
+    sql: ["sql"],
+    bash: ["bash"],
+  };
+  const normalizedProblemType = problemType.toLowerCase();
+  const permittedForType = languageOptionsByType[normalizedProblemType] ?? [];
+  const executionLanguages = allowedLanguages.filter((language) =>
+    permittedForType.includes(normalizeLanguage(language))
+  );
+  const previousLanguage = previousSubmission?.language
+    ? executionLanguages.find(
+        (language) =>
+          normalizeLanguage(language) ===
+          normalizeLanguage(previousSubmission.language)
+      )
+    : undefined;
+  const preferredLanguage =
+    normalizedProblemType === "sql"
       ? "sql"
-      : problemType === "bash"
-      ? "shell"
-      : problemType === "development"
+      : normalizedProblemType === "bash"
+      ? "bash"
+      : normalizedProblemType === "development"
       ? "javascript"
-      : previousSubmission?.language &&
-        ["java", "cpp", "python"].includes(previousSubmission.language.toLowerCase())
-      ? previousSubmission.language.toLowerCase()
       : "java";
+  const defaultLanguage =
+    previousLanguage ??
+    executionLanguages.find(
+      (language) => normalizeLanguage(language) === preferredLanguage
+    ) ??
+    executionLanguages[0] ??
+    "";
 
   const [selectedLanguage, setSelectedLanguage] = useState<string>(defaultLanguage);
+  const selectedLanguageRef = useRef(defaultLanguage);
+  const dirtyLanguages = useRef(new Set<string>());
 
-  // Maintain user code cache per language so code is preserved across language changes
   const [codeByLanguage, setCodeByLanguage] = useState<Record<string, string>>(() => {
-    const initialMap: Record<string, string> = {
-      java: getStarterCode(problemSlug, problemTitle, "java"),
-      cpp: getStarterCode(problemSlug, problemTitle, "cpp"),
-      python: getStarterCode(problemSlug, problemTitle, "python"),
-    };
+    const initialMap: Record<string, string> = {};
     if (previousSubmission?.code && previousSubmission.language) {
       initialMap[previousSubmission.language.toLowerCase()] = previousSubmission.code;
     }
     return initialMap;
   });
 
-  // Files state (multi-file support for development problems)
   const [files, setFiles] = useState<ProblemFile[]>(() => {
     if (initialFiles.length > 0) return initialFiles;
-
-    const initialCode =
-      codeByLanguage[defaultLanguage] ??
-      getStarterCode(problemSlug, problemTitle, defaultLanguage);
 
     return [
       {
         id: 1,
         problem_id: problemId,
         file_path: `Solution.${getFileExtension(defaultLanguage)}`,
-        file_content: initialCode,
+        file_content:
+          previousLanguage && previousSubmission?.code
+            ? previousSubmission.code
+            : "",
         language: getMonacoLanguage(defaultLanguage),
         is_editable: true,
         is_entry_point: true,
@@ -271,53 +208,15 @@ export function MonacoEditor({
   const [isRunning, setIsRunning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
+  const [executionError, setExecutionError] = useState<string | null>(null);
+  const [templateStates, setTemplateStates] = useState<
+    Record<string, "loading" | "loaded" | "missing" | "error">
+  >({});
+  const [templateErrors, setTemplateErrors] = useState<Record<string, string>>({});
   const [hasCopiedCode, setHasCopiedCode] = useState(false);
+  const requestedLanguages = useRef(new Set<string>());
 
-  // Prepare display test cases with robust fallbacks
-  const displayTestCases: TestCase[] =
-    testCases.filter((tc) => !tc.is_hidden).length > 0
-      ? testCases.filter((tc) => !tc.is_hidden)
-      : problemSlug === "two-sum" || problemTitle.toLowerCase().includes("two sum")
-      ? [
-          {
-            id: 1,
-            problem_id: problemId,
-            input_data: "nums = [2,7,11,15], target = 9",
-            expected_output: "[0, 1]",
-            is_hidden: false,
-            weight: 1,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: 2,
-            problem_id: problemId,
-            input_data: "nums = [3,2,4], target = 6",
-            expected_output: "[1, 2]",
-            is_hidden: false,
-            weight: 1,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: 3,
-            problem_id: problemId,
-            input_data: "nums = [3,3], target = 6",
-            expected_output: "[0, 1]",
-            is_hidden: false,
-            weight: 1,
-            created_at: new Date().toISOString(),
-          },
-        ]
-      : [
-          {
-            id: 1,
-            problem_id: problemId,
-            input_data: "input = [1, 2, 3]",
-            expected_output: "[1, 2, 3]",
-            is_hidden: false,
-            weight: 1,
-            created_at: new Date().toISOString(),
-          },
-        ];
+  const displayTestCases = testCases.filter((testCase) => !testCase.is_hidden);
 
   const currentTestCase = displayTestCases[selectedTestCaseIndex] ?? displayTestCases[0];
 
@@ -326,6 +225,7 @@ export function MonacoEditor({
   // Handler for code changes in Monaco
   const handleCodeChange = (value?: string) => {
     const code = value ?? "";
+    dirtyLanguages.current.add(selectedLanguage);
     setCodeByLanguage((prev) => ({
       ...prev,
       [selectedLanguage]: code,
@@ -337,26 +237,22 @@ export function MonacoEditor({
     );
   };
 
-  // Handler for language switch: updates syntax, starter code, and Monaco language
   const handleLanguageChange = (newLang: string) => {
     const currentCode = activeFile?.file_content ?? "";
-    const updatedCodeMap = {
-      ...codeByLanguage,
+    setCodeByLanguage((previous) => ({
+      ...previous,
       [selectedLanguage]: currentCode,
-    };
-
-    // Retrieve previous code for new language or generate starter template
-    const nextCode =
-      updatedCodeMap[newLang] ??
-      getStarterCode(problemSlug, problemTitle, newLang);
-
-    updatedCodeMap[newLang] = nextCode;
-    setCodeByLanguage(updatedCodeMap);
+    }));
+    selectedLanguageRef.current = newLang;
     setSelectedLanguage(newLang);
 
     const newExt = getFileExtension(newLang);
     const newFileName = `Solution.${newExt}`;
     const newMonacoLang = getMonacoLanguage(newLang);
+    const nextCode =
+      codeByLanguage[newLang] ??
+      codeByLanguage[normalizeLanguage(newLang)] ??
+      "";
 
     setFiles((prev) =>
       prev.map((f, idx) =>
@@ -373,9 +269,76 @@ export function MonacoEditor({
     setActiveFilePath(newFileName);
   };
 
+  useEffect(() => {
+    if (!selectedLanguage || requestedLanguages.current.has(selectedLanguage)) {
+      return;
+    }
+
+    const language = selectedLanguage;
+    requestedLanguages.current.add(language);
+    const hadExistingCode =
+      codeByLanguage[language] !== undefined ||
+      codeByLanguage[normalizeLanguage(language)] !== undefined;
+
+    setTemplateStates((previous) => ({
+      ...previous,
+      [language]: "loading",
+    }));
+
+    fetchProblemCodeTemplate(problemId, language)
+      .then((template) => {
+        if (!template) {
+          setTemplateStates((previous) => ({
+            ...previous,
+            [language]: "missing",
+          }));
+          return;
+        }
+
+        setTemplateStates((previous) => ({
+          ...previous,
+          [language]: "loaded",
+        }));
+
+        if (hadExistingCode || dirtyLanguages.current.has(language)) return;
+
+        setCodeByLanguage((previous) => ({
+          ...previous,
+          [language]: template.starter_code,
+        }));
+        setFiles((previous) => {
+          if (selectedLanguageRef.current !== language) return previous;
+          return previous.map((file, index) =>
+            index === 0
+              ? {
+                  ...file,
+                  file_path: `Solution.${getFileExtension(language)}`,
+                  file_content: template.starter_code,
+                  language: getMonacoLanguage(language),
+                }
+              : file
+          );
+        });
+      })
+      .catch((error: unknown) => {
+        setTemplateStates((previous) => ({
+          ...previous,
+          [language]: "error",
+        }));
+        setTemplateErrors((previous) => ({
+          ...previous,
+          [language]:
+            error instanceof Error
+              ? error.message
+              : "An unexpected error occurred while loading the starter template.",
+        }));
+      });
+  }, [codeByLanguage, problemId, selectedLanguage]);
+
   const handleRunCode = async () => {
     setIsRunning(true);
     setActiveLeftTab("results");
+    setExecutionError(null);
     try {
       const result = await submitProblemSolution({
         problemId,
@@ -388,8 +351,10 @@ export function MonacoEditor({
         })),
       });
       setExecutionResult(result);
-    } catch {
-      // Handled in API layer fallback
+    } catch (error: unknown) {
+      setExecutionError(
+        error instanceof Error ? error.message : "Code execution failed."
+      );
     } finally {
       setIsRunning(false);
     }
@@ -398,6 +363,7 @@ export function MonacoEditor({
   const handleSubmitCode = async () => {
     setIsSubmitting(true);
     setActiveLeftTab("results");
+    setExecutionError(null);
     try {
       const result = await submitProblemSolution({
         problemId,
@@ -413,8 +379,10 @@ export function MonacoEditor({
       if (onSubmissionSuccess) {
         onSubmissionSuccess(result);
       }
-    } catch {
-      // Handled in API layer fallback
+    } catch (error: unknown) {
+      setExecutionError(
+        error instanceof Error ? error.message : "Code submission failed."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -580,6 +548,12 @@ export function MonacoEditor({
                   </ul>
                 </div>
               )}
+
+              {testCasesError && (
+                <p role="alert" className="text-xs text-amber-400">
+                  Public examples could not be loaded: {testCasesError}
+                </p>
+              )}
             </div>
           )}
 
@@ -595,6 +569,10 @@ export function MonacoEditor({
                   <p className="text-xs text-slate-500">
                     Executing in sandbox environment...
                   </p>
+                </div>
+              ) : executionError ? (
+                <div role="alert" className="p-4 rounded-lg border border-rose-500/30 bg-rose-500/5 text-sm text-rose-300">
+                  {executionError}
                 </div>
               ) : !executionResult ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
@@ -875,29 +853,22 @@ export function MonacoEditor({
               <select
                 value={selectedLanguage}
                 onChange={(e) => handleLanguageChange(e.target.value)}
+                disabled={executionLanguages.length === 0}
                 className="bg-slate-950 border border-slate-700 rounded px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium cursor-pointer"
               >
-                {problemType === "sql" ? (
-                  <option value="sql">PostgreSQL / SQL</option>
-                ) : problemType === "bash" ? (
-                  <option value="bash">Bash Script</option>
-                ) : problemType === "development" ? (
-                  <>
-                    <option value="javascript">JavaScript</option>
-                    <option value="typescript">TypeScript</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="java">Java</option>
-                    <option value="cpp">C++</option>
-                    <option value="python">Python</option>
-                  </>
+                {executionLanguages.length === 0 && (
+                  <option value="">No executable languages configured</option>
                 )}
+                {executionLanguages.map((language) => (
+                  <option key={language} value={language}>
+                    {getLanguageLabel(language)}
+                  </option>
+                ))}
               </select>
             </div>
 
             {/* Development multi-file tab selector */}
-            {problemType === "development" && (
+            {normalizedProblemType === "development" && (
               <div className="flex items-center gap-1 border-l border-slate-800 pl-3">
                 {files.map((file) => (
                   <button
@@ -923,6 +894,11 @@ export function MonacoEditor({
               variant="outline"
               size="sm"
               onClick={handleRunCode}
+              disabled={
+                !selectedLanguage ||
+                templateStates[selectedLanguage] === "loading" ||
+                isSubmitting
+              }
               isLoading={isRunning}
               className="text-xs border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-slate-100"
             >
@@ -933,6 +909,11 @@ export function MonacoEditor({
               variant="gradient"
               size="sm"
               onClick={handleSubmitCode}
+              disabled={
+                !selectedLanguage ||
+                templateStates[selectedLanguage] === "loading" ||
+                isRunning
+              }
               isLoading={isSubmitting}
               className="text-xs font-semibold"
             >
@@ -942,10 +923,38 @@ export function MonacoEditor({
           </div>
         </div>
 
+        {(executionConfigError || executionLanguages.length === 0) && (
+          <div role="alert" className="border-b border-amber-500/20 bg-amber-500/5 px-4 py-2 text-xs text-amber-300">
+            {executionConfigError
+              ? `Execution languages could not be loaded: ${executionConfigError}`
+              : "No executable languages are configured for this problem."}
+          </div>
+        )}
+
+        {selectedLanguage &&
+          (templateStates[selectedLanguage] === "loading" ||
+            templateStates[selectedLanguage] === "missing" ||
+            templateStates[selectedLanguage] === "error") && (
+            <div
+              role={templateStates[selectedLanguage] === "error" ? "alert" : "status"}
+              className={`border-b px-4 py-2 text-xs ${
+                templateStates[selectedLanguage] === "error"
+                  ? "border-rose-500/20 bg-rose-500/5 text-rose-300"
+                  : "border-amber-500/20 bg-amber-500/5 text-amber-300"
+              }`}
+            >
+              {templateStates[selectedLanguage] === "loading"
+                ? `Loading ${getLanguageLabel(selectedLanguage)} starter code...`
+                : templateStates[selectedLanguage] === "missing"
+                ? `No ${getLanguageLabel(selectedLanguage)} starter template exists for this problem. Choose another supported language or write your own code.`
+                : templateErrors[selectedLanguage]}
+            </div>
+          )}
+
         {/* Main Workspace (Monaco Editor & optional Multi-file Explorer) */}
         <div className="flex-1 flex overflow-hidden">
           {/* Multi-file Explorer Side Navigation (Only for Development Type) */}
-          {problemType === "development" && (
+          {normalizedProblemType === "development" && (
             <div className="w-48 bg-slate-900/60 border-r border-slate-800 p-2 text-xs">
               <div className="flex items-center gap-1.5 px-2 py-1 text-slate-400 font-semibold mb-2 uppercase tracking-wider">
                 <FolderTree className="w-3.5 h-3.5" />
@@ -1042,9 +1051,11 @@ export function MonacoEditor({
                 </div>
               </div>
             ) : (
-              <div className="text-slate-500 font-sans py-4 text-center">
-                Default sample test cases available for practice.
-              </div>
+              <p className="text-slate-500 font-sans">
+                {testCasesError
+                  ? "Public examples are unavailable."
+                  : "No public examples are available for this problem."}
+              </p>
             )}
           </div>
         </div>

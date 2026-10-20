@@ -30,18 +30,30 @@ export default function ProblemsPage() {
   const [types, setTypes] = useState<ProblemType[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
 
   const pageSize = 8;
 
   useEffect(() => {
     async function loadMetadata() {
-      const { data: catData } = await supabase.from("categories").select("*");
-      if (catData) setCategories(catData);
+      const [
+        { data: catData, error: categoriesError },
+        { data: typeData, error: typesError },
+      ] = await Promise.all([
+        supabase.from("categories").select("*"),
+        supabase.from("problem_types").select("*"),
+      ]);
 
-      const { data: typeData } = await supabase
-        .from("problem_types")
-        .select("*");
+      if (catData) setCategories(catData);
       if (typeData) setTypes(typeData);
+
+      const errors = [categoriesError, typesError]
+        .filter((metadataError) => metadataError !== null)
+        .map((metadataError) => metadataError.message);
+      if (errors.length > 0) {
+        setMetadataError(`Some filters could not be loaded: ${errors.join("; ")}`);
+      }
     }
     loadMetadata();
   }, [supabase]);
@@ -49,14 +61,16 @@ export default function ProblemsPage() {
   useEffect(() => {
     async function fetchProblems() {
       setIsLoading(true);
+      setErrorMessage(null);
       try {
         let query = supabase
           .from("problems")
           .select(
             `
-            *,
-            problem_type:problem_types(*),
-            categories:problem_categories(categories(*))
+            id, problem_number, title, slug, description, type_id, difficulty,
+            problem_type:problem_types${type ? "!inner" : ""}(*),
+            categories:problem_categories${category ? "!inner" : ""}(categories${category ? "!inner" : ""}(*)),
+            tags:problem_tags(tags(*))
           `,
             { count: "exact" }
           )
@@ -72,56 +86,45 @@ export default function ProblemsPage() {
           query = query.eq("difficulty", difficulty);
         }
 
+        if (type) {
+          query = query.eq("problem_type.name", type);
+        }
+
+        if (category) {
+          query = query.eq("categories.categories.slug", category);
+        }
+
         const from = (page - 1) * pageSize;
         const to = from + pageSize - 1;
 
-        const { data, count, error } = await query.range(from, to);
+        const { data, count, error } = await query
+          .order("problem_number", { ascending: true })
+          .range(from, to);
 
-        if (!error && data) {
-          const formatted = data.map((p) => ({
-            ...p,
-            categories: p.categories
-              ? p.categories.map((c: { categories: unknown }) => c.categories)
-              : [],
-          }));
-          setProblems(formatted);
-          setTotalCount(count ?? 0);
-        } else {
-          // Fallback initial sample problem for pristine DB state
-          setProblems([
-            {
-              id: 1,
-              title: "Two Sum",
-              slug: "two-sum",
-              description: "Find two indices such that their values sum to target.",
-              difficulty: "Easy",
-              type_id: 1,
-              constraints: "2 <= nums.length <= 10^4",
-              hints: ["Use a hash map for O(n) lookup time."],
-              is_published: true,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              problem_type: { id: 1, name: "dsa", description: "DSA" },
-            },
-            {
-              id: 2,
-              title: "Multi-File React Todo Component",
-              slug: "react-todo-component",
-              description: "Build a stateful Todo application supporting adding and filtering tasks.",
-              difficulty: "Medium",
-              type_id: 2,
-              constraints: "Support filter tabs: All, Active, Completed",
-              hints: ["Store tasks in useState array."],
-              is_published: true,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              problem_type: { id: 2, name: "development", description: "Dev" },
-            },
-          ]);
-          setTotalCount(2);
+        if (error) {
+          throw new Error(error.message);
         }
-      } catch {
-        // Handled
+        const formatted = (data ?? []).map((problem) => ({
+          ...problem,
+          categories: problem.categories
+            ? problem.categories.map(
+                (relation: { categories: unknown }) => relation.categories
+              )
+            : [],
+          tags: problem.tags
+            ? problem.tags.map((relation: { tags: unknown }) => relation.tags)
+            : [],
+        }));
+        setProblems(formatted);
+        setTotalCount(count ?? 0);
+      } catch (error: unknown) {
+        setProblems([]);
+        setTotalCount(0);
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred while loading problems."
+        );
       } finally {
         setIsLoading(false);
       }
@@ -154,6 +157,11 @@ export default function ProblemsPage() {
       </div>
 
       {/* Filter Toolbar */}
+      {metadataError && (
+        <p role="status" className="text-xs text-amber-400">
+          {metadataError}
+        </p>
+      )}
       <ProblemFilters
         search={search}
         category={category}
@@ -190,6 +198,13 @@ export default function ProblemsPage() {
             />
           ))}
         </div>
+      ) : errorMessage ? (
+        <Card role="alert" className="text-center py-12 space-y-3">
+          <h3 className="text-base font-semibold text-rose-300">
+            Unable to load problems
+          </h3>
+          <p className="text-xs text-slate-400">{errorMessage}</p>
+        </Card>
       ) : problems.length > 0 ? (
         <div className="space-y-3">
           {problems.map((problem) => (
@@ -206,7 +221,7 @@ export default function ProblemsPage() {
         <Card className="text-center py-12 space-y-3">
           <Sparkles className="w-8 h-8 text-slate-500 mx-auto" />
           <h3 className="text-base font-semibold text-slate-300">
-            No matching problems found
+            No published problems found
           </h3>
           <p className="text-xs text-slate-500">
             Try adjusting your search criteria or resetting filters.
